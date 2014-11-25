@@ -66,30 +66,46 @@ class BaxterPour:
 		return
 
 	def inverse_kinematics(self,data):
+            hdr = Header(stamp=rospy.Time.now(), frame_id='base')
+            poses = {
+                'left': PoseStamped(
+                    header=hdr,
+                    pose=Pose(
+                        position=Point(
+                            x=0.657579481614,
+                            y=0.851981417433,
+                            z=0.0388352386502,
+                        ),
+                        orientation=Quaternion(
+                            x=-0.366894936773,
+                            y=0.885980397775,
+                            z=0.108155782462,
+                            w=0.262162481772,
+                        ),
+                    ),
+                ),
+                'right': PoseStamped(
+                    header=hdr,
+                    pose=Pose(
+                        position=Point(
+                            x=0.656982770038,
+                            y=-0.852598021641,
+                            z=0.0388609422173,
+                        ),
+                        orientation=Quaternion(
+                            x=0.367048116303,
+                            y=0.885911751787,
+                            z=-0.108908281936,
+                            w=0.261868353356,
+                        ),
+                    ),
+                ),
+            }
 
-		self.hdr = Header(stamp=rospy.Time.now(), frame_id='base')
+	
 
-		self.poses = {
-	        'left': PoseStamped(
-	            header=hdr,
-	            pose=Pose(
-	                position=Point(
-	                    x=0.657579481614,
-	                    y=0.851981417433,
-	                    z=0.0388352386502,
-	                ),
-	                orientation=Quaternion(
-	                    x=-0.366894936773,
-	                    y=0.885980397775,
-	                    z=0.108155782462,
-	                    w=0.262162481772,
-	                ),
-	            ),
-	        ),    
-	    }
-
-	    rospy.wait_for_service('/ExternalTools/left/PositionKinematicsNode/IKService')
-	    ik = rospy.ServiceProxy('/ExternalTools/left/PositionKinematicsNode/IKService',SolvePositionIK)
+	   # rospy.wait_for_service('/ExternalTools/left/PositionKinematicsNode/IKService')
+	   # ik = rospy.ServiceProxy('/ExternalTools/left/PositionKinematicsNode/IKService',SolvePositionIK)
 
 	    # result = ik(self.poses)
 	    print self.poses

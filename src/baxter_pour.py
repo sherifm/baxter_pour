@@ -4,18 +4,25 @@ import rospy
 import math
 import tf
 from tf.transformations import euler_from_quaternion
-from tf.transformations import compose_matrix
-from tf.transformations import is_same_transform
 from geometry_msgs.msg import Twist, Pose, PoseStamped,Point,Quaternion
 from sensor_msgs.msg import JointState
 from urdf_parser_py.urdf import URDF
-from pykdl_utils.kdl_parser import kdl_tree_from_urdf_model
-from pykdl_utils.kdl_kinematics import KDLKinematics
-from baxter_pykdl.baxter_pykdl import baxter_kinematics
 from baxter_core_msgs.msg import EndpointState 
-from baxter_core_msgs.srv import SolvePositionIK, SolvePositionIKRequest
+import baxter_interface
 
 import numpy
+
+#From baxter_example ik service
+import argparse
+import struct
+import sys
+
+from std_msgs.msg import Header
+
+from baxter_core_msgs.srv import (
+    SolvePositionIK,
+    SolvePositionIKRequest,
+)
 
 class BaxterPour:
 	def __init__(self):
@@ -36,12 +43,11 @@ class BaxterPour:
 		self.joint_state_sub = rospy.Subscriber("/robot/joint_states", JointState, self.get_joint_states)
 		self.end_eff_state_sub = rospy.Subscriber("/robot/limb/left/endpoint_state",EndpointState,self.get_end_eff_state)
 		
+		self.cmd_pos=numpy.array([0.78,0.34,-0.07])
 
 
-		self.baxterkdl=baxter_kinematics('left')
-		self.timer1 = rospy.Timer(rospy.Duration(0.01), self.inverse_kinematics) 
-
-		
+		# self.timer1 = rospy.Timer(rospy.Duration(0.01),) 
+		self.ik_main()
 
 		return	
 
@@ -51,7 +57,6 @@ class BaxterPour:
 		except rospy.ROSInterruptException: 
 			self.q_sensors = None
 			pass
-		
 		return
 
 	def get_end_eff_state(self,data):
@@ -65,52 +70,112 @@ class BaxterPour:
 
 		return
 
-	def inverse_kinematics(self,data):
-            hdr = Header(stamp=rospy.Time.now(), frame_id='base')
-            poses = {
-                'left': PoseStamped(
-                    header=hdr,
-                    pose=Pose(
-                        position=Point(
-                            x=0.657579481614,
-                            y=0.851981417433,
-                            z=0.0388352386502,
-                        ),
-                        orientation=Quaternion(
-                            x=-0.366894936773,
-                            y=0.885980397775,
-                            z=0.108155782462,
-                            w=0.262162481772,
-                        ),
-                    ),
-                ),
-                'right': PoseStamped(
-                    header=hdr,
-                    pose=Pose(
-                        position=Point(
-                            x=0.656982770038,
-                            y=-0.852598021641,
-                            z=0.0388609422173,
-                        ),
-                        orientation=Quaternion(
-                            x=0.367048116303,
-                            y=0.885911751787,
-                            z=-0.108908281936,
-                            w=0.261868353356,
-                        ),
-                    ),
-                ),
-            }
+	def ik_main(self):
+	    print "Hello"
+	    """RSDK Inverse Kinematics Example
 
-	
+	    A simple example of using the Rethink Inverse Kinematics
+	    Service which returns the joint angles and validity for
+	    a requested Cartesian Pose.
 
-	   # rospy.wait_for_service('/ExternalTools/left/PositionKinematicsNode/IKService')
-	   # ik = rospy.ServiceProxy('/ExternalTools/left/PositionKinematicsNode/IKService',SolvePositionIK)
+	    Run this example, passing the *limb* to test, and the
+	    example will call the Service with a sample Cartesian
+	    Pose, pre-defined in the example code, printing the
+	    response of whether a valid joint solution was found,
+	    and if so, the corresponding joint angles.
+	    """
+	    self.arg_fmt = argparse.RawDescriptionHelpFormatter
+	    self.parser = argparse.ArgumentParser(formatter_class=self.arg_fmt,
+	                                     description=main.__doc__)
+	    # self.parser.add_argument(
+	    #     '-l', '--limb', choices=['left', 'right'], required=True,
+	    #     help="the limb to test"
+	    # )
+	    # self.args = self.parser.parse_args(rospy.myargv()[1:])
+	    self.arm = 'left'
+	    return self.ik_test(self.arm)	
 
-	    # result = ik(self.poses)
-	    print self.poses
+	def ik_test(self,limb):
+	    
+	    #rospy.init_node("rsdk_ik_service_client")
+	    self.ns = "ExternalTools/" + limb + "/PositionKinematicsNode/IKService"
+	    self.iksvc = rospy.ServiceProxy(self.ns, SolvePositionIK)
+	    self.ikreq = SolvePositionIKRequest()
+	    self.hdr = Header(stamp=rospy.Time.now(), frame_id='base')
+	    self.x=self.cmd_pos[0]
+	    self.poses = {
+	        'left': PoseStamped(
+	            header=self.hdr,
+	            pose=Pose(
+	                position=Point(
+	                    x=self.cmd_pos[0],
+	                    y=self.cmd_pos[1],
+	                    z=-self.cmd_pos[2]
+	                ),
+	                orientation=Quaternion(
+	                    x=0.367048116303,
+	                    y=0.885911751787,
+	                    z=-0.108908281936,
+	                    w=0.261868353356,
+	                ),
+	            ),
+	        ),
+	        'right': PoseStamped(
+	            header=self.hdr,
+	            pose=Pose(
+	                position=Point(
+	                    x=0.656982770038,
+	                    y=-0.852598021641,
+	                    z=0.0388609422173,
+	                ),
+	                orientation=Quaternion(
+	                    x=0.367048116303,
+	                    y=0.885911751787,
+	                    z=-0.108908281936,
+	                    w=0.261868353356,
+	                ),
+	            ),
+	        ),
+	    }
 
-	    # print ik
+	    self.ikreq.pose_stamp.append(self.poses[limb])
+	    try:
+	        rospy.wait_for_service(self.ns, 5.0)
+	        self.resp = self.iksvc(self.ikreq)
+	    except (rospy.ServiceException, rospy.ROSException), e:
+	        rospy.logerr("Service call failed: %s" % (e,))
+	        return 1
+
+	    # Check if result valid, and type of seed ultimately used to get solution
+	    # convert rospy's string representation of uint8[]'s to int's
+	    self.resp_seeds = struct.unpack('<%dB' % len(self.resp.result_type),
+	                               self.resp.result_type)
+	    if (self.resp_seeds[0] != self.resp.RESULT_INVALID):
+	        self.seed_str = {
+	                    self.ikreq.SEED_USER: 'User Provided Seed',
+	                    self.ikreq.SEED_CURRENT: 'Current Joint Angles',
+	                    self.ikreq.SEED_NS_MAP: 'Nullspace Setpoints',
+	                   }.get(self.resp_seeds[0], 'None')
+	        # print("SUCCESS - Valid Joint Solution Found from Seed Type: %s" %
+	        #       (self.seed_str,))
+	        # Format solution into Limb API-compatible dictionary
+	        self.limb_joints = dict(zip(self.resp.joints[0].name, self.resp.joints[0].position))
+	        #print "\nIK Joint Solution:\n", self.limb_joints
+	        #print "------------------"
+	        #print "Response Message:\n", self.resp
+
+	        print self.limb_joints
+	        return self.cmd_joint_angles(self.limb_joints)
+	    else:
+	        print("INVALID POSE - No Valid Joint Solution Found.")
+
+	    return 0
+
+	def cmd_joint_angles(self, data):
+		self.limb = baxter_interface.Limb(self.arm)
+		self.limb.move_to_joint_positions(data)
+		print "i'm trying to move"
+		pass
 
 
 def main():

@@ -98,7 +98,8 @@ class BaxterPour:
 	        (self.transl,self.quat)=self.listener.lookupTransform('base','kinect',rospy.Time(0))
 	        self.rot = euler_from_quaternion(self.quat)
 	        self.tf_SE3 = compose_matrix(angles=self.rot,translate = self.transl)
-	        self.cmd_pos=numpy.array([0.78,0.34,-0.07])
+	        self.cmd_pos=numpy.dot(self.tf_SE3,numpy.array([-.03,-.09,0.77,1]))
+	        print self.cmd_pos
 	        numpy.dot(self.tf_SE3,numpy.array([-.03,-.09,0.77,1]))
 	    except (tf.Exception):
 	        rospy.logerr("Could not transform from "\
@@ -120,10 +121,10 @@ class BaxterPour:
 	                    z=-self.cmd_pos[2]
 	                ),
 	                orientation=Quaternion(
-	                    x=0.367048116303,
-	                    y=0.885911751787,
-	                    z=-0.108908281936,
-	                    w=0.261868353356,
+	                    x=-.5,
+	                    y=.5,
+	                    z=-.5,
+	                    w=.5,	                    
 	                ),
 	            ),
 	        ),

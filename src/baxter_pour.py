@@ -3,17 +3,18 @@
 import rospy
 import math
 import tf
-from tf.transformations import euler_from_quaternion
-from geometry_msgs.msg import Twist, Pose, PoseStamped,Point,Quaternion
+from tf.transformations import euler_from_quaternion, compose_matrix
+from geometry_msgs.msg import Twist, Pose, PoseStamped,Point,Quaternion,TransformStamped
 from sensor_msgs.msg import JointState
 from urdf_parser_py.urdf import URDF
 from baxter_core_msgs.msg import EndpointState 
 import baxter_interface
+import time
 
 import numpy
 
 #From baxter_example ik service
-import argparse
+import argparse 
 import struct
 import sys
 
@@ -32,8 +33,6 @@ class BaxterPour:
 		self.baxter = URDF.from_parameter_server() 
 		#Note: 	A node that initializes and runs the baxter has to be running in the background for 
 		#		from_parameter_server to to find the parameter.
-
-		
 		#		Older versions of URDF label the function "load_from_parameter_server"
 
 
@@ -43,9 +42,7 @@ class BaxterPour:
 		self.joint_state_sub = rospy.Subscriber("/robot/joint_states", JointState, self.get_joint_states)
 		self.end_eff_state_sub = rospy.Subscriber("/robot/limb/left/endpoint_state",EndpointState,self.get_end_eff_state)
 		
-		self.cmd_pos=numpy.array([0.78,0.34,-0.07])
-
-
+		self.listener=tf.TransformListener()
 		# self.timer1 = rospy.Timer(rospy.Duration(0.01),) 
 		self.ik_main()
 
@@ -71,7 +68,6 @@ class BaxterPour:
 		return
 
 	def ik_main(self):
-	    print "Hello"
 	    """RSDK Inverse Kinematics Example
 
 	    A simple example of using the Rethink Inverse Kinematics
@@ -96,8 +92,19 @@ class BaxterPour:
 	    return self.ik_test(self.arm)	
 
 	def ik_test(self,limb):
-	    
-	    #rospy.init_node("rsdk_ik_service_client")
+	    # t = self.listener.getLatestCommonTime('base', 'kinect') Better solution. Returns 0. Lear proper way: posestamped, frame_ID etc 
+	    try:
+	        time.sleep(1)
+	        (self.transl,self.quat)=self.listener.lookupTransform('base','kinect',rospy.Time(0))
+	        self.rot = euler_from_quaternion(self.quat)
+	        self.tf_SE3 = compose_matrix(angles=self.rot,translate = self.transl)
+	        self.cmd_pos=numpy.array([0.78,0.34,-0.07])
+	        numpy.dot(self.tf_SE3,numpy.array([-.03,-.09,0.77,1]))
+	    except (tf.Exception):
+	        rospy.logerr("Could not transform from "\
+	                     "{0:s} to {1:s}".format(base,kinect))
+	        return
+	  	
 	    self.ns = "ExternalTools/" + limb + "/PositionKinematicsNode/IKService"
 	    self.iksvc = rospy.ServiceProxy(self.ns, SolvePositionIK)
 	    self.ikreq = SolvePositionIKRequest()

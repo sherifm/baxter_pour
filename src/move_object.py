@@ -22,9 +22,13 @@ from baxter_core_msgs.srv import (
     SolvePositionIKRequest,
 )
 
-class BaxterPour:
+
+class BaxterMove:
     def __init__(self):
         print 'initializing'
+
+        self.approach_distance = .1
+        self.elevated_distance = .2
         
         #Find the baxter from the parameter server
         self.baxter = URDF.from_parameter_server() 
@@ -36,18 +40,113 @@ class BaxterPour:
         #Subscribe to the "baxter1_joint_states" topic, which provides the joint states measured by the baxter in a
         # ROS message of the type sensor_msgs/JointState. Every time a message is published to that topic run the 
         #callback function self.get_joint_states, which is defined below.
-        self.joint_state_sub = rospy.Subscriber("/robot/joint_states", JointState, self.get_joint_states)
+        #self.joint_state_sub = rospy.Subscriber("/robot/joint_states", JointState, self.get_joint_states)
         self.end_eff_state_sub = rospy.Subscriber("/robot/limb/left/endpoint_state",EndpointState,self.get_end_eff_state)
-        self.left_hand_range= rospy.Subscriber("/robot/range/left_hand_range/state",Range,self.get_depth)
         
         self.listener=tf.TransformListener()
+
+        #initialize gripper
+        self.initialize_gripper()
         # self.timer1 = rospy.Timer(rospy.Duration(0.01),) 
 
         #calibrate the gripper
-        self.initialize_gripper()
+        #self.initialize_gripper()
+
+        #Get pick up and drop off coords
+        #I.e subscr. or ...
+
 
         self.main()
-        return  
+        return 
+
+    def main(self):
+
+        #define your limb
+        self.arm = 'left'
+
+        # move to offset
+        self.pickup_data = numpy.array([0.729708830721,-0.00177498224766,-0.13805627181,1])
+        self.dropoff_data=numpy.array([0.729708830721,0.2,-0.13805627181,1])
+        self.move_to_approach_pose(self.pickup_data)
+
+        #approach, grasp, lift
+        self.pickup_object()
+
+        #move away from table to an elevated pick up waypoint
+        current_pose=self.end_eff_state.pose.position
+        current_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
+        self.move_to_approach_pose(current_pose)
+
+        #move to 'approach position' of elevated drop off waypoint
+        elevated_dropoff_waypoint = self.dropoff_data
+        elevated_dropoff_waypoint[2]=elevated_dropoff_waypoint[2]+self.elevated_distance
+        self.move_to_approach_pose(elevated_dropoff_waypoint)
+
+        # approach,lower,release
+        self.drop_off_object()
+        # move to approach position     
+
+
+        
+       
+
+
+    def move_to_approach_pose(self,pose):
+
+        approach_pose=pose
+        approach_pose[0]=approach_pose[0]-self.approach_distance
+
+        approach_configuration=self.ik(self.arm,approach_pose)
+        self.cmd_joint_angles(approach_configuration)
+
+
+    def pickup_object(self):
+
+        #move forward to grasp position
+        current_pose=self.end_eff_state.pose.position
+        grasp_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
+        grasp_pose[0]=grasp_pose[0]+self.approach_distance
+        grasp_configuration=self.ik(self.arm,grasp_pose)
+        self.cmd_joint_angles(grasp_configuration) 
+        time.sleep(2)
+        #grasp object
+        self.close_gripper()
+        time.sleep(2)
+
+        #lift oject to elevated position
+        current_pose=self.end_eff_state.pose.position
+        elevated_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
+        elevated_pose[2]=elevated_pose[2]+self.elevated_distance
+        elevated_configuration=self.ik(self.arm,elevated_pose)
+        self.cmd_joint_angles(elevated_configuration)
+        time.sleep(2)
+
+    def drop_off_object(self):
+        #move forward to elevated drop-off waypoint
+        current_pose=self.end_eff_state.pose.position
+        elevated_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
+        elevated_pose[0] = elevated_pose[0]+self.approach_distance
+        elevated_configuration=self.ik(self.arm,elevated_pose)
+        self.cmd_joint_angles(elevated_configuration)
+        time.sleep(2)
+
+        #lower arm to drop-off waypoint
+        current_pose=self.end_eff_state.pose.position
+        release_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
+        release_pose[2] =release_pose[2]-self.elevated_distance
+        release_configuration=self.ik(self.arm,release_pose)
+        self.cmd_joint_angles(release_configuration)
+        time.sleep(2)
+
+        #open gripper
+        self.open_gripper()
+        time.sleep(2)
+
+        #move back to drop-off 'aproach' waypoint
+        current_pose=self.end_eff_state.pose.position
+        drop_off_pose=numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
+        self.move_to_approach_pose(drop_off_pose)
+
 
     def initialize_gripper(self):
         # initialize interfaces
@@ -56,174 +155,6 @@ class BaxterPour:
         init_state = rs.state().enabled
         self.left_gripper = baxter_interface.Gripper('left', CHECK_VERSION)
         self.right_gripper = baxter_interface.Gripper('right', CHECK_VERSION)
-
-        self.left_gripper.calibrate()
-
-    def main(self):
-
-        #define offset
-        self.offset = .1
-
-        #define your limb
-        self.arm = 'left'
-
-        #move limb 
-
-        #get kinect data
-        # self.kinect_data = numpy.array([.012,-.027,0.761,1])
-        # self.approach_pose = self.kinect_to_base(self.kinect_data)
-        self.approach_pose = numpy.array([.7,.52,-.08,1])
-
-        self.approach_pose[0] = self.approach_pose[0]-self.offset
-        self.first_configuration = self.ik(self.arm, self.approach_pose)
-
-        #move to first location
-        self.cmd_joint_angles(self.first_configuration)
-
-        #while we're not close to our object, keep making small adjustments
-        self.approach_object(self.approach_pose)
-        self.weigh_object()
-        self.release_object()	
-
-    def use_waypoints(self,target):
-        #move to first waypoint
-        #move to second waypoint
-        pass
-
-    def release_object(self):
-    	time.sleep(1)
-
-    	#get the current position
-        current_pose=self.end_eff_state.pose.position
-
-        lowered_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
-        lowered_pose[2] = lowered_pose[2] - self.delta_z_desired
-
-        #run the IK and move
-        new_joint_angles = self.ik(self.arm,lowered_pose)
-        self.cmd_joint_angles(new_joint_angles)
-        time.sleep(2)
-
-        #open gripper and move to neutral position
-        self.open_gripper()
-        time.sleep(1)
-        current_pose=self.end_eff_state.pose.position
-        offset_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
-        offset_pose[0] = offset_pose[0] - self.delta_z_desired
-        new_joint_angles = self.ik(self.arm,offset_pose)
-        self.cmd_joint_angles(new_joint_angles)
-        time.sleep(2)
-
-    def weigh_object(self):
-        #get initial force in z
-        time.sleep(2)
-        current_weight=self.end_eff_state.wrench.force.z
-
-        #close the gripper
-        self.close_gripper()
-        #raises the object a small amount to evaluate weight at the end effector
-        print 'elevating'
-        self.delta_z_desired=0.1
-
-        #get the current position
-        current_pose=self.end_eff_state.pose.position
-
-        #set the new position with a small delta
-        elevated_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
-        elevated_pose[2] = elevated_pose[2] + self.delta_z_desired
-
-        #run the IK and move
-        new_joint_angles = self.ik(self.arm,elevated_pose)
-        self.cmd_joint_angles(new_joint_angles)
-
-        time.sleep(2)
-        #get new force in z and print weight
-        new_weight=self.end_eff_state.wrench.force.z
-        print new_weight-current_weight
-
-
-        # delta_z_desired=0.4
-        # current_pose= current_pose=self.end_eff_state.pose.position
-        # elevated_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
-        # elevated_pose[1] = elevated_pose[1] + delta_z_desired
-
-        # #run the IK and move
-        # new_joint_angles = self.ik(self.arm,elevated_pose)
-        # self.cmd_joint_angles(new_joint_angles)
-
-    def approach_object(self,initial_pose):
-        #open the gripper
-        self.open_gripper()
-
-
-        self.desired_depth = 0.03
-        
-        # temp = initial_pose
-        # count = 0
-
-        # # while count < 10:
-        # #     print self.depth
-        # #     count += 1
-
-        # time.sleep(2)
-        # print 'old depth is',self.depth
-        # temp[0] = temp[0] + self.depth - self.desired_depth
-        # temp_configuration = self.ik(self.arm, temp)
-        # self.cmd_joint_angles(temp_configuration)
-        # print 'new depth is',self.depth
-
-        temp = initial_pose
-
-        time.sleep(2)
-        temp[0] = temp[0]+self.offset-self.desired_depth
-        temp_configuration=self.ik(self.arm,temp)
-        self.cmd_joint_angles(temp_configuration)
-
-    def close_gripper(self):
-        self.left_gripper.close()
-        pass
-
-    def open_gripper(self):
-        self.left_gripper.open()
-        pass
-
-    def get_joint_states(self,data):
-        try:
-            self.q_sensors = data.position
-        except rospy.ROSInterruptException: 
-            self.q_sensors = None
-            pass
-        return
-
-    def get_end_eff_state(self,data):
-        
-        try:
-            self.end_eff_state=data
-            # print self.end_eff_state
-        except  rospy.ROSInterruptException:
-            self.end_eff_state = None
-            pass
-
-        return
-
-    def get_depth(self,data):
-        self.depth=data.range
-
-    def kinect_to_base(self,kinect_pose):
-        try:
-            time.sleep(1)
-            (self.transl,self.quat)=self.listener.lookupTransform('base','kinect',rospy.Time(0))
-            self.rot = euler_from_quaternion(self.quat)
-            self.tf_SE3 = compose_matrix(angles=self.rot,translate = self.transl)
-            print self.tf_SE3
-            base_pos=numpy.dot(self.tf_SE3,kinect_pose)
-            print base_pos
-            # print self.cmd_pos
-        except (tf.Exception):
-            rospy.logerr("Could not transform from "\
-                         "{0:s} to {1:s}".format(base,kinect))
-            pass
-        return base_pos
 
     def ik(self,limb, cmd_pos):
         self.arg_fmt = argparse.RawDescriptionHelpFormatter
@@ -325,16 +256,34 @@ class BaxterPour:
         print "i'm trying to move"
         pass
 
+    def get_end_eff_state(self,data):
+        
+        try:
+            self.end_eff_state=data
+            # print self.end_eff_state
+        except  rospy.ROSInterruptException:
+            self.end_eff_state = None
+            pass
+
+        return   
+
+    def close_gripper(self):
+        self.left_gripper.close()
+        pass
+
+    def open_gripper(self):
+        self.left_gripper.open()
+        pass 
 
 def main():
     """
     Run the main loop, by instatiating a System class, and then
     calling ros.spin
     """
-    rospy.init_node('baxter_pour')
+    rospy.init_node('baxter_move_object')
 
     try:
-        demo = BaxterPour()
+        demo = BaxterMove()
     except rospy.ROSInterruptException: pass
 
     rospy.spin()

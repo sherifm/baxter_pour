@@ -22,10 +22,17 @@ from baxter_core_msgs.srv import (
     SolvePositionIKRequest,
 )
 
-class BaxterPour:
-    def __init__(self):
-        print 'initializing'
-        
+import roslib
+import actionlib
+import baxter_pour.msg
+
+class BaxterWeigh(object):
+
+    _feedback = baxter_pour.msg.WeighFeedback()
+    _result   = baxter_pour.msg.WeighResult()
+
+    def __init__(self,name):
+        print 'server initialized'
         #Find the baxter from the parameter server
         self.baxter = URDF.from_parameter_server() 
         #Note:  A node that initializes and runs the baxter has to be running in the background for 
@@ -46,7 +53,14 @@ class BaxterPour:
         #calibrate the gripper
         self.initialize_gripper()
 
-        self.main()
+
+        self._action_name = name
+        #The main function of BaxterWeigh is called whenever a client sends a goal to weigh_server
+        self._as = actionlib.SimpleActionServer(self._action_name, baxter_pour.msg.WeighAction, execute_cb=self.main, auto_start = False)
+        self._as.start()
+
+        #To test the node separatly call self.main() manually
+        # self.main()
         return  
 
     def initialize_gripper(self):
@@ -59,7 +73,11 @@ class BaxterPour:
 
         self.left_gripper.calibrate()
 
-    def main(self):
+    def main(self,goal):
+
+        # helper variables
+        r = rospy.Rate(1)
+        success = True        
 
         #define offset
         self.offset = .1
@@ -72,18 +90,27 @@ class BaxterPour:
         #get kinect data
         # self.kinect_data = numpy.array([.012,-.027,0.761,1])
         # self.approach_pose = self.kinect_to_base(self.kinect_data)
-        self.approach_pose = numpy.array([.7,.52,-.08,1])
 
+        #Get pickup location from client
+        pickup_data = numpy.array([goal.x_pickup, goal.y_pickup, goal.z_pickup,1])
+        #Create offset in preparation to approach the object
+        self.approach_pose = pickup_data
         self.approach_pose[0] = self.approach_pose[0]-self.offset
-        self.first_configuration = self.ik(self.arm, self.approach_pose)
+        self.approach_configuration = self.ik(self.arm, self.approach_pose)
 
-        #move to first location
-        self.cmd_joint_angles(self.first_configuration)
+        #move to approach location
+        self.cmd_joint_angles(self.approach_configuration)
 
-        #while we're not close to our object, keep making small adjustments
+        #aproach the object
         self.approach_object(self.approach_pose)
-        self.weigh_object()
-        self.release_object()	
+        #grasp, lift and weigh the object
+        weight=self.weigh_object()
+        self.release_object()
+        self._result.weight=weight	
+
+        if success:
+          rospy.loginfo('%s: Reported object weight of...' % self._action_name)
+          self._as.set_succeeded(self._result)
 
     def use_waypoints(self,target):
         #move to first waypoint
@@ -140,6 +167,8 @@ class BaxterPour:
         #get new force in z and print weight
         new_weight=self.end_eff_state.wrench.force.z
         print new_weight-current_weight
+
+        return new_weight
 
 
         # delta_z_desired=0.4
@@ -260,9 +289,9 @@ class BaxterPour:
                     ),
                     orientation=Quaternion(
 
-                        x=.70711,
+                        x=.866,
                         y=0,
-                        z=.70711,
+                        z=.5,
                         w=0,                     
                     ),
                 ),
@@ -331,10 +360,10 @@ def main():
     Run the main loop, by instatiating a System class, and then
     calling ros.spin
     """
-    rospy.init_node('baxter_pour')
+    rospy.init_node('weigh_server')
 
     try:
-        demo = BaxterPour()
+        demo = BaxterWeigh(rospy.get_name())
     except rospy.ROSInterruptException: pass
 
     rospy.spin()

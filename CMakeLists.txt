@@ -9,6 +9,10 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
   tf 
+  actionlib_msgs
+  actionlib
+  message_generation
+  std_msgs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -58,18 +62,16 @@ find_package(catkin REQUIRED COMPONENTS
 #   Service2.srv
 # )
 
-## Generate actions in the 'action' folder
-# add_action_files(
-#   FILES
-#   Action1.action
-#   Action2.action
-# )
+# Generate actions in the 'action' folder
+add_action_files(
+  DIRECTORY action
+  FILES Move.action Weigh.action
+)
 
-## Generate added messages and services with any dependencies listed here
-# generate_messages(
-#   DEPENDENCIES
-#   std_msgs  # Or other packages containing msgs
-# )
+# Generate added messages and services with any dependencies listed here
+generate_messages(
+  DEPENDENCIES std_msgs actionlib_msgs # Or other packages containing msgs
+)
 
 ###################################
 ## catkin specific configuration ##
@@ -83,8 +85,8 @@ find_package(catkin REQUIRED COMPONENTS
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES baxter_pour
-#  CATKIN_DEPENDS baxter_pykdl roscpp rospy tf
-#  DEPENDS system_lib
+ CATKIN_DEPENDS actionlib_msgs #baxter_pykdl roscpp rospy tf
+ # DEPENDS system_lib
 )
 
 ###########

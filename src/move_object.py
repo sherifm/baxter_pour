@@ -22,13 +22,21 @@ from baxter_core_msgs.srv import (
     SolvePositionIKRequest,
 )
 
+import roslib
+import actionlib
+import baxter_pour.msg
 
-class BaxterMove:
-    def __init__(self):
+
+class BaxterMove(object):
+
+    _feedback = baxter_pour.msg.MoveFeedback()
+    _result   = baxter_pour.msg.MoveResult()
+
+    def __init__(self,name):
         print 'initializing'
 
-        self.approach_distance = .1
-        self.elevated_distance = .2
+        self.approach_distance = 0 #.07
+        self.elevated_distance = .3
         
         #Find the baxter from the parameter server
         self.baxter = URDF.from_parameter_server() 
@@ -50,23 +58,38 @@ class BaxterMove:
         # self.timer1 = rospy.Timer(rospy.Duration(0.01),) 
 
         #calibrate the gripper
-        #self.initialize_gripper()
+        self.left_gripper.calibrate()
 
         #Get pick up and drop off coords
         #I.e subscr. or ...
 
 
-        self.main()
+        self._action_name = name
+        #The main function of BaxterMove is called whenever a client sends a goal to move_server
+        self._as = actionlib.SimpleActionServer(self._action_name, baxter_pour.msg.MoveAction, execute_cb=self.main, auto_start = False)
+        self._as.start()
+
+        #To test the node separatly call self.main() manually
+        #self.main()
+
         return 
 
-    def main(self):
+    def main(self,goal):
+        # helper variables
+        r = rospy.Rate(1)
+        success = True
 
         #define your limb
         self.arm = 'left'
 
+        #get pick-up and drop-off data
+        self.pickup_data = numpy.array([goal.x_pickup, goal.y_pickup, goal.z_pickup,1])
+        print 'received pick-up data: ', self.pickup_data
+        self.dropoff_data=numpy.array([goal.x_dropoff, goal.y_dropoff, goal.z_dropoff,1])
+
+
         # move to offset
-        self.pickup_data = numpy.array([0.729708830721,-0.00177498224766,-0.13805627181,1])
-        self.dropoff_data=numpy.array([0.729708830721,0.2,-0.13805627181,1])
+        # self.move_to_approach_pose1(self.pickup_data)
         self.move_to_approach_pose(self.pickup_data)
 
         #approach, grasp, lift
@@ -79,22 +102,26 @@ class BaxterMove:
 
         #move to 'approach position' of elevated drop off waypoint
         elevated_dropoff_waypoint = self.dropoff_data
-        elevated_dropoff_waypoint[2]=elevated_dropoff_waypoint[2]+self.elevated_distance
+        # elevated_dropoff_waypoint[2]=elevated_dropoff_waypoint[2]+self.elevated_distance
         self.move_to_approach_pose(elevated_dropoff_waypoint)
 
         # approach,lower,release
         self.drop_off_object()
-        # move to approach position     
+        # move to approach position 
 
+        self._result.status=True
 
-        
-       
+        if success:
+          rospy.loginfo('%s: Succeeded' % self._action_name)
+          self._as.set_succeeded(self._result)     
 
 
     def move_to_approach_pose(self,pose):
 
         approach_pose=pose
         approach_pose[0]=approach_pose[0]-self.approach_distance
+        approach_pose[2]=approach_pose[2]+self.elevated_distance
+
 
         approach_configuration=self.ik(self.arm,approach_pose)
         self.cmd_joint_angles(approach_configuration)
@@ -106,6 +133,9 @@ class BaxterMove:
         current_pose=self.end_eff_state.pose.position
         grasp_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
         grasp_pose[0]=grasp_pose[0]+self.approach_distance
+
+        grasp_pose[2]=grasp_pose[2]-self.elevated_distance
+
         grasp_configuration=self.ik(self.arm,grasp_pose)
         self.cmd_joint_angles(grasp_configuration) 
         time.sleep(2)
@@ -114,26 +144,27 @@ class BaxterMove:
         time.sleep(2)
 
         #lift oject to elevated position
-        current_pose=self.end_eff_state.pose.position
-        elevated_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
-        elevated_pose[2]=elevated_pose[2]+self.elevated_distance
-        elevated_configuration=self.ik(self.arm,elevated_pose)
-        self.cmd_joint_angles(elevated_configuration)
+        # current_pose=self.end_eff_state.pose.position
+        # elevated_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
+        # elevated_pose[2]=elevated_pose[2]+self.elevated_distance
+        # elevated_configuration=self.ik(self.arm,elevated_pose)
+        # self.cmd_joint_angles(elevated_configuration)
         time.sleep(2)
 
     def drop_off_object(self):
         #move forward to elevated drop-off waypoint
-        current_pose=self.end_eff_state.pose.position
-        elevated_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
-        elevated_pose[0] = elevated_pose[0]+self.approach_distance
-        elevated_configuration=self.ik(self.arm,elevated_pose)
-        self.cmd_joint_angles(elevated_configuration)
-        time.sleep(2)
+        # current_pose=self.end_eff_state.pose.position
+        # elevated_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
+        # elevated_pose[0] = elevated_pose[0]+self.approach_distance
+        # elevated_configuration=self.ik(self.arm,elevated_pose)
+        # self.cmd_joint_angles(elevated_configuration)
+        # time.sleep(2)
 
         #lower arm to drop-off waypoint
         current_pose=self.end_eff_state.pose.position
         release_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
         release_pose[2] =release_pose[2]-self.elevated_distance
+        release_pose[0] =release_pose[0]+self.approach_distance
         release_configuration=self.ik(self.arm,release_pose)
         self.cmd_joint_angles(release_configuration)
         time.sleep(2)
@@ -156,24 +187,12 @@ class BaxterMove:
         self.left_gripper = baxter_interface.Gripper('left', CHECK_VERSION)
         self.right_gripper = baxter_interface.Gripper('right', CHECK_VERSION)
 
+
+
     def ik(self,limb, cmd_pos):
         self.arg_fmt = argparse.RawDescriptionHelpFormatter
         self.parser = argparse.ArgumentParser(formatter_class=self.arg_fmt,
                                          description=main.__doc__)
-
-        # t = self.listener.getLatestCommonTime('base', 'kinect') Better solution. Returns 0. Lear proper way: posestamped, frame_ID etc 
-        # try:
-        #     time.sleep(1)
-        #     (self.transl,self.quat)=self.listener.lookupTransform('base','kinect',rospy.Time(0))
-        #     self.rot = euler_from_quaternion(self.quat)
-        #     self.tf_SE3 = compose_matrix(angles=self.rot,translate = self.transl)
-        #     self.cmd_pos=numpy.dot(self.tf_SE3,kinect)
-        #     print self.tf_SE3
-        #     # print self.cmd_pos
-        # except (tf.Exception):
-        #     rospy.logerr("Could not transform from "\
-        #                  "{0:s} to {1:s}".format(base,kinect))
-        #     return
         
         self.ns = "ExternalTools/" + limb + "/PositionKinematicsNode/IKService"
         self.iksvc = rospy.ServiceProxy(self.ns, SolvePositionIK)
@@ -191,10 +210,10 @@ class BaxterMove:
                     ),
                     orientation=Quaternion(
 
-                        x=.70711,
+                        x=1,
                         y=0,
-                        z=.70711,
-                        w=0,                     
+                        z=0,
+                        w=0,                 
                     ),
                 ),
             ),
@@ -280,10 +299,10 @@ def main():
     Run the main loop, by instatiating a System class, and then
     calling ros.spin
     """
-    rospy.init_node('baxter_move_object')
+    rospy.init_node('move_server')
 
     try:
-        demo = BaxterMove()
+        demo = BaxterMove(rospy.get_name())
     except rospy.ROSInterruptException: pass
 
     rospy.spin()

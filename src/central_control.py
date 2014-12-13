@@ -49,19 +49,50 @@ class central_control:
 
     def main(self):
 
+        self.posepickup1=numpy.array([.6,.6,-0.02])
+        self.posepickup2=numpy.array([.6,.5,-0.02])
+        self.posepickup3=numpy.array([.6,.4,-0.02])        
+
+        self.posedrop1=numpy.array([.7,.6,-0.02])
+        self.posedrop2=numpy.array([.7,.5,-0.02])
+        self.posedrop3=numpy.array([.7,.4,-0.02])
+
+        weight1=self.weigh_client(self.posepickup1).weight
+        weight2=self.weigh_client(self.posepickup2).weight
+        weight3=self.weigh_client(self.posepickup3).weight
+
+        unsorted_matrix = (
+            (weight1,['ID1',self.posepickup1[0],self.posepickup1[1],self.posepickup1[2]]),
+            (weight2,['ID2',self.posepickup2[0],self.posepickup2[1],self.posepickup2[2]]),
+            (weight3,['ID3',self.posepickup3[0],self.posepickup3[1],self.posepickup3[2]])
+            )
+
+        sorted_matrix = sorted(unsorted_matrix,key=lambda unsorted_matrix:unsorted_matrix[0])
+
+
+        print unsorted_matrix
+        print sorted_matrix
+
+        self.move_to_sort(sorted_matrix)
         #get kinect data
         # self.kinect_data = numpy.array([.05,.279,.762,1])
         # self.pickup_pose = self.kinect_to_base(self.kinect_data)
 
         #weigih each object. And store into unsorted matrix
-        # weigh_object = self.weigh_client()
+
+        # self.pickup_pose = numpy.array([ .7,.6 ,-.02])
+        # weigh_object = self.weigh_client(self.pickup_pose)
         # print "Result:", weigh_object.weight, "Kg"
 
 
         #create and sort data matrix
 
-        self.sorted_matrix = ((10,['ID1',.6,.4,-.02]),(1,['ID2',.6,.6,-.02]),(100,['ID3',.6,.5,-.02]))
-        self.move_to_sort(self.sorted_matrix)
+        # self.sorted_matrix = ((10,['ID1',.6,.4,-.02]),(1,['ID2',.6,.6,-.02]),(100,['ID3',.6,.5,-.02]))
+        # self.move_to_sort(self.sorted_matrix)
+
+
+
+
         #self.pickup_pose = numpy.array([0.6 ,0.4 , -0.0232258427437])
         #self.dropoff_pose = numpy.array([0.9 ,0.4 , -0.0232258427437])
         #move_object = self.move_client(self.pickup_pose,self.dropoff_pose)
@@ -70,31 +101,31 @@ class central_control:
 
 
     def move_to_sort(self,matrix):
-        #self.dropoff_pose = numpy.array([0.9 ,0.4 , -0.0232258427437])
 
+        print 'move sorted called'
 
         self.pickup_pose = numpy.array([matrix[0][1][1] ,matrix[0][1][2] , matrix[0][1][3]])
-        self.dropoff_pose = numpy.array([ .7,.6 ,-.02])
+        self.dropoff_pose = self.posedrop1
         
         self.move_client(self.pickup_pose,self.dropoff_pose)
 
         self.pickup_pose = numpy.array([matrix[1][1][1] ,matrix[1][1][2] , matrix[1][1][3]])
-        self.dropoff_pose = numpy.array([ .7,.5 ,-.02])
+        self.dropoff_pose = self.posedrop2
         
         self.move_client(self.pickup_pose,self.dropoff_pose)
 
         self.pickup_pose = numpy.array([matrix[2][1][1] ,matrix[2][1][2] , matrix[2][1][3]])
-        self.dropoff_pose = numpy.array([ .7,.4 ,-.02])
+        self.dropoff_pose = self.posedrop3
         
         self.move_client(self.pickup_pose,self.dropoff_pose)
 
 
 
-        #unsorted_matrix = ((10,[ID1,x1,y1,z1]),(1,[ID2,x2,y2,z2]),(100,[ID3,x3,y3,z3]))
-        #sorted_matrix = sorted(unsorted_matrix,key=lambda dist:dist[0])
+
+        
 
 
-    def weigh_client(name):
+    def weigh_client(name,pickup_pose):
         
         # Creates the SimpleActionClient, passing the type of the action
         # (MoveAction) to the constructor.
@@ -105,7 +136,7 @@ class central_control:
         client.wait_for_server()
 
         # Creates a goal to send to the action server.
-        goal = baxter_pour.msg.WeighGoal(x_pickup=0.856 , y_pickup=0.58 , z_pickup=-0.097)
+        goal = baxter_pour.msg.WeighGoal(x_pickup=pickup_pose[0] , y_pickup=pickup_pose[1] , z_pickup=pickup_pose[2])
 
         # Sends the goal to the action server.
         client.send_goal(goal)

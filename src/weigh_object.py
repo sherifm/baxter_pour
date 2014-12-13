@@ -32,7 +32,9 @@ class BaxterWeigh(object):
     _result   = baxter_pour.msg.WeighResult()
 
     def __init__(self,name):
-        print 'server initialized'
+
+        self.elevated_distance = .3 #.07
+
         #Find the baxter from the parameter server
         self.baxter = URDF.from_parameter_server() 
         #Note:  A node that initializes and runs the baxter has to be running in the background for 
@@ -45,7 +47,6 @@ class BaxterWeigh(object):
         #callback function self.get_joint_states, which is defined below.
         self.joint_state_sub = rospy.Subscriber("/robot/joint_states", JointState, self.get_joint_states)
         self.end_eff_state_sub = rospy.Subscriber("/robot/limb/left/endpoint_state",EndpointState,self.get_end_eff_state)
-        self.left_hand_range= rospy.Subscriber("/robot/range/left_hand_range/state",Range,self.get_depth)
         
         self.listener=tf.TransformListener()
         # self.timer1 = rospy.Timer(rospy.Duration(0.01),) 
@@ -63,6 +64,36 @@ class BaxterWeigh(object):
         # self.main()
         return  
 
+    def main(self,goal):
+                # helper variables
+        r = rospy.Rate(1)
+        success = True  
+
+        #define your limb
+        self.arm = 'left'
+
+        #Get pickup location from client
+        pickup_data = numpy.array([goal.x_pickup, goal.y_pickup, goal.z_pickup,1])
+
+        # move to offset
+        self.move_to_approach_pose(pickup_data)
+
+        #approach, grasp, lift, weigh, put back, go to approach pose
+        weight=self.weigh_object()
+        self._result.weight=weight  
+
+        if success:
+          rospy.loginfo('%s: Reported object weight of...' % self._action_name)
+          self._as.set_succeeded(self._result)
+
+    def move_to_approach_pose(self,pose):
+
+        approach_pose=pose
+        approach_pose[2]=approach_pose[2]+self.elevated_distance
+        approach_configuration=self.ik(self.arm,approach_pose)
+        self.cmd_joint_angles(approach_configuration)
+
+
     def initialize_gripper(self):
         # initialize interfaces
         print("Getting robot state... ")
@@ -73,84 +104,24 @@ class BaxterWeigh(object):
 
         self.left_gripper.calibrate()
 
-    def main(self,goal):
-
-        # helper variables
-        r = rospy.Rate(1)
-        success = True        
-
-        #define offset
-        self.offset = .1
-
-        #define your limb
-        self.arm = 'left'
-
-        #move limb 
-
-        #get kinect data
-        # self.kinect_data = numpy.array([.012,-.027,0.761,1])
-        # self.approach_pose = self.kinect_to_base(self.kinect_data)
-
-        #Get pickup location from client
-        pickup_data = numpy.array([goal.x_pickup, goal.y_pickup, goal.z_pickup,1])
-        #Create offset in preparation to approach the object
-        self.approach_pose = pickup_data
-        self.approach_pose[0] = self.approach_pose[0]-self.offset
-        self.approach_configuration = self.ik(self.arm, self.approach_pose)
-
-        #move to approach location
-        self.cmd_joint_angles(self.approach_configuration)
-
-        #aproach the object
-        self.approach_object(self.approach_pose)
-        #grasp, lift and weigh the object
-        weight=self.weigh_object()
-        self.release_object()
-        self._result.weight=weight	
-
-        if success:
-          rospy.loginfo('%s: Reported object weight of...' % self._action_name)
-          self._as.set_succeeded(self._result)
-
-    def use_waypoints(self,target):
-        #move to first waypoint
-        #move to second waypoint
-        pass
-
-    def release_object(self):
-    	time.sleep(1)
-
-    	#get the current position
-        current_pose=self.end_eff_state.pose.position
-
-        lowered_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
-        lowered_pose[2] = lowered_pose[2] - self.delta_z_desired
-
-        #run the IK and move
-        new_joint_angles = self.ik(self.arm,lowered_pose)
-        self.cmd_joint_angles(new_joint_angles)
-        time.sleep(2)
-
-        #open gripper and move to neutral position
-        self.open_gripper()
-        time.sleep(1)
-        current_pose=self.end_eff_state.pose.position
-        offset_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
-        offset_pose[0] = offset_pose[0] - self.delta_z_desired
-        new_joint_angles = self.ik(self.arm,offset_pose)
-        self.cmd_joint_angles(new_joint_angles)
-        time.sleep(2)
-
     def weigh_object(self):
+
+        #move to grasp position
+        current_pose=self.end_eff_state.pose.position
+        grasp_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
+        grasp_pose[2]=grasp_pose[2]-self.elevated_distance
+        grasp_configuration=self.ik(self.arm,grasp_pose)
+        self.cmd_joint_angles(grasp_configuration) 
+        time.sleep(2)
+
         #get initial force in z
         time.sleep(2)
-        current_weight=self.end_eff_state.wrench.force.z
+        initial_weight=self.end_eff_state.wrench.force.z
 
         #close the gripper
         self.close_gripper()
         #raises the object a small amount to evaluate weight at the end effector
-        print 'elevating'
-        self.delta_z_desired=0.1
+        self.delta_z_desired=0.05
 
         #get the current position
         current_pose=self.end_eff_state.pose.position
@@ -166,93 +137,40 @@ class BaxterWeigh(object):
         time.sleep(2)
         #get new force in z and print weight
         new_weight=self.end_eff_state.wrench.force.z
-        print new_weight-current_weight
+
+        time.sleep(1)
+
+        actual_weight=new_weight-initial_weight
+        print 'Reported weight:',actual_weight
+
+        #get the current position
+        lowered_pose=elevated_pose
+        lowered_pose[2] = lowered_pose[2] - self.delta_z_desired
+
+        #run the IK and move
+        new_joint_angles = self.ik(self.arm,lowered_pose)
+        self.cmd_joint_angles(new_joint_angles)
+        time.sleep(2)
+
+
+        #open gripper 
+        self.open_gripper()
+        time.sleep(1)       
+
+        #move back to approach position 
+        current_pose=self.end_eff_state.pose.position
+        current_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
+        self.move_to_approach_pose(current_pose)
 
         return new_weight
 
-
-        # delta_z_desired=0.4
-        # current_pose= current_pose=self.end_eff_state.pose.position
-        # elevated_pose = numpy.array([current_pose.x,current_pose.y,current_pose.z,1])
-        # elevated_pose[1] = elevated_pose[1] + delta_z_desired
-
-        # #run the IK and move
-        # new_joint_angles = self.ik(self.arm,elevated_pose)
-        # self.cmd_joint_angles(new_joint_angles)
-
-    def approach_object(self,initial_pose):
-        #open the gripper
-        self.open_gripper()
-
-
-        self.desired_depth = 0.03
-        
-        # temp = initial_pose
-        # count = 0
-
-        # # while count < 10:
-        # #     print self.depth
-        # #     count += 1
-
-        # time.sleep(2)
-        # print 'old depth is',self.depth
-        # temp[0] = temp[0] + self.depth - self.desired_depth
-        # temp_configuration = self.ik(self.arm, temp)
-        # self.cmd_joint_angles(temp_configuration)
-        # print 'new depth is',self.depth
-
-        temp = initial_pose
-
-        time.sleep(2)
-        temp[0] = temp[0]+self.offset-self.desired_depth
-        temp_configuration=self.ik(self.arm,temp)
-        self.cmd_joint_angles(temp_configuration)
-
-    def close_gripper(self):
-        self.left_gripper.close()
+    def cmd_joint_angles(self, data):
+        self.limb = baxter_interface.Limb(self.arm)
+        self.limb.move_to_joint_positions(data)
+        print "i'm trying to move"
         pass
 
-    def open_gripper(self):
-        self.left_gripper.open()
-        pass
 
-    def get_joint_states(self,data):
-        try:
-            self.q_sensors = data.position
-        except rospy.ROSInterruptException: 
-            self.q_sensors = None
-            pass
-        return
-
-    def get_end_eff_state(self,data):
-        
-        try:
-            self.end_eff_state=data
-            # print self.end_eff_state
-        except  rospy.ROSInterruptException:
-            self.end_eff_state = None
-            pass
-
-        return
-
-    def get_depth(self,data):
-        self.depth=data.range
-
-    def kinect_to_base(self,kinect_pose):
-        try:
-            time.sleep(1)
-            (self.transl,self.quat)=self.listener.lookupTransform('base','kinect',rospy.Time(0))
-            self.rot = euler_from_quaternion(self.quat)
-            self.tf_SE3 = compose_matrix(angles=self.rot,translate = self.transl)
-            print self.tf_SE3
-            base_pos=numpy.dot(self.tf_SE3,kinect_pose)
-            print base_pos
-            # print self.cmd_pos
-        except (tf.Exception):
-            rospy.logerr("Could not transform from "\
-                         "{0:s} to {1:s}".format(base,kinect))
-            pass
-        return base_pos
 
     def ik(self,limb, cmd_pos):
         self.arg_fmt = argparse.RawDescriptionHelpFormatter
@@ -289,9 +207,9 @@ class BaxterWeigh(object):
                     ),
                     orientation=Quaternion(
 
-                        x=.866,
+                        x=1,
                         y=0,
-                        z=.5,
+                        z=0,
                         w=0,                     
                     ),
                 ),
@@ -348,11 +266,33 @@ class BaxterWeigh(object):
             print("INVALID POSE - No Valid Joint Solution Found.")
         return self.limb_joints
 
-    def cmd_joint_angles(self, data):
-        self.limb = baxter_interface.Limb(self.arm)
-        self.limb.move_to_joint_positions(data)
-        print "i'm trying to move"
+
+    def close_gripper(self):
+        self.left_gripper.close()
         pass
+
+    def open_gripper(self):
+        self.left_gripper.open()
+        pass
+
+    def get_joint_states(self,data):
+        try:
+            self.q_sensors = data.position
+        except rospy.ROSInterruptException: 
+            self.q_sensors = None
+            pass
+        return
+
+    def get_end_eff_state(self,data):
+        
+        try:
+            self.end_eff_state=data
+            # print self.end_eff_state
+        except  rospy.ROSInterruptException:
+            self.end_eff_state = None
+            pass
+
+        return
 
 
 def main():
@@ -370,3 +310,5 @@ def main():
 
 if __name__=='__main__':
     main()
+
+
